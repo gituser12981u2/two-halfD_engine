@@ -18,7 +18,6 @@ impl Camera {
         // rotation by -yaw: (x', y') = (x * cos(yaw) + y * sin(yaw), -x * sin(yaw) + y * cos(yaw))
         let cx = dx * c - dy * s;
         let cy = dx * s + dy * c;
-        println!("yaw: {}, c: {}, s: {}", self.yaw, c, s,);
         [cx, cy]
     }
 
