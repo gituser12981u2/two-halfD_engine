@@ -37,26 +37,26 @@ impl Default for App {
         };
         let walls = vec![
             Wall {
-                start: [-1.0, 6.0],
-                end: [1.0, 6.0],
+                start: [-1.0, 8.0],
+                end: [1.0, 8.0],
                 front_sector: 0,
                 back_sector: None,
             },
             Wall {
-                start: [1.0, 5.0],
-                end: [1.0, 7.0],
+                start: [1.0, 8.0],
+                end: [1.0, 10.0],
                 front_sector: 0,
                 back_sector: None,
             },
             Wall {
-                start: [1.0, 7.0],
-                end: [-1.0, 7.0],
+                start: [1.0, 10.0],
+                end: [-1.0, 10.0],
                 front_sector: 0,
                 back_sector: None,
             },
             Wall {
-                start: [-1.0, 7.0],
-                end: [-1.0, 5.0],
+                start: [-1.0, 10.0],
+                end: [-1.0, 8.0],
                 front_sector: 0,
                 back_sector: None,
             },

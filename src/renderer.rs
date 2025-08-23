@@ -49,18 +49,18 @@ pub fn render_frame(buf: &mut [u32], width: usize, height: usize, world: &World,
         db.partial_cmp(&da).unwrap_or(std::cmp::Ordering::Equal) // farthest first
     });
 
+    let wall_colors = [
+        pack_rgb(200, 200, 200),
+        pack_rgb(180, 180, 250),
+        pack_rgb(250, 180, 180),
+        pack_rgb(180, 250, 180),
+    ];
+
     for i in order {
         let wall = &world.walls[i];
         let sector = &world.sectors[wall.front_sector];
-        draw_solid_wall(
-            buf,
-            width,
-            height,
-            camera,
-            wall,
-            sector,
-            pack_rgb(200, 200, 200),
-        );
+        let color = wall_colors[i % wall_colors.len()];
+        draw_solid_wall(buf, width, height, camera, wall, sector, color);
     }
 }
 
