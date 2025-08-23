@@ -81,6 +81,27 @@ fn draw_solid_wall(
     let mut p0 = camera.world_to_camera(wall.start);
     let mut p1 = camera.world_to_camera(wall.end);
 
+    // Trivial reject: both behind near plane
+    if p0[1] <= NEAR && p1[1] <= NEAR {
+        return;
+    }
+
+    // Horizontal frustum reject (fully outside left/right)
+    let tan_half_fovx = 0.5 * screen_width / camera.fx;
+
+    let left_plane = |cx: f32, cy: f32| cx < -cy * tan_half_fovx;
+    let right_plane = |cx: f32, cy: f32| cx > cy * tan_half_fovx;
+
+    // Both endpoints are on the same outside side, cull
+    let p0_left = left_plane(p0[0], p0[1]);
+    let p1_left = left_plane(p1[0], p1[1]);
+    let p0_right = right_plane(p0[0], p0[1]);
+    let p1_right = right_plane(p1[0], p1[1]);
+
+    if (p0_left && p1_left) || (p0_right && p1_right) {
+        return; // fully left
+    }
+
     // Clip against near plane (cy > NEAR)
     if !clip_line_near(&mut p0, &mut p1) {
         return; // fully clipped
