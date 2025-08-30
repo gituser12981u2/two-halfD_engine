@@ -28,11 +28,11 @@ impl Camera {
         self.fx * (cx / cy) + cx0
     }
 
-    pub fn set_fov_from_height(&mut self, width: f32, height: f32, fov_y_deg: f32) {
-        let fov_y = fov_y_deg.to_radians();
-        self.fy = 0.5 * height / (0.5 * fov_y).tan();
+    pub fn set_fov_from_horizontal(&mut self, width: f32, height: f32, fov_x_deg: f32) {
+        let fov_x = fov_x_deg.to_radians();
+        self.fx = 0.5 * width / (0.5 * fov_x).tan();
         let aspect = width / height;
-        self.fx = self.fy * aspect;
+        self.fy = self.fx / aspect;
     }
 
     #[inline]
