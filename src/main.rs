@@ -11,10 +11,12 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 use crate::camera::Camera;
+use crate::scaler::{ScaleLut, blit_bilinear_stretch, build_scale_lut, sharpen3x3_cross_inplace};
 use crate::world::{Sector, Wall, World};
 
 mod camera;
 mod renderer;
+mod scaler;
 mod world;
 
 struct App {
@@ -23,6 +25,18 @@ struct App {
     world: World,
     camera: Camera,
 
+    // HUD
+    frame_counter: u32,
+    last_fps_print: Instant,
+
+    // Internal 640x480 buffer
+    fb_small: Vec<u32>,
+    fb_w: usize,
+    fb_h: usize,
+
+    scale_lut: ScaleLut,
+
+    // Input and movement
     keys_down: HashSet<KeyCode>,
     last_tick: Instant,
     move_speed: f32,
@@ -76,6 +90,16 @@ impl Default for App {
                 fx: 0.0,
                 fy: 0.0,
             },
+
+            frame_counter: 0,
+            last_fps_print: Instant::now(),
+
+            fb_small: vec![0; 640 * 480],
+            fb_w: 640,
+            fb_h: 480,
+
+            scale_lut: ScaleLut::empty(),
+
             keys_down: HashSet::new(),
             last_tick: Instant::now(),
             move_speed: 3.0,                  // m/s
@@ -98,8 +122,7 @@ impl ApplicationHandler for App {
 
         // Update camera focal factors
         let size = window.inner_size();
-        self.camera
-            .set_fov_from_height(size.width as f32, size.height as f32, 75.0);
+        self.rebuild_internal_fb_and_lut(size.width as usize, size.height as usize);
 
         self.surface = Some(surface);
         self.window = Some(window);
@@ -146,38 +169,52 @@ impl ApplicationHandler for App {
                 };
 
                 let size = window.inner_size();
-                if size.width == 0 || size.height == 0 {
+                let (dw, dh) = (size.width as usize, size.height as usize);
+                if dw == 0 || dh == 0 {
                     return; // Minimized window, skip drawing
                 }
 
                 // Set softbuffer to window size
                 surface
                     .resize(
-                        NonZeroU32::new(size.width).unwrap(),
-                        NonZeroU32::new(size.height).unwrap(),
+                        NonZeroU32::new(dw as u32).unwrap(),
+                        NonZeroU32::new(dh as u32).unwrap(),
                     )
                     .unwrap();
 
-                let mut buf = surface.buffer_mut().expect("buffer_mut");
                 renderer::render_frame(
-                    &mut buf,
-                    size.width as usize,
-                    size.height as usize,
+                    &mut self.fb_small,
+                    self.fb_w,
+                    self.fb_h,
                     &self.world,
                     &self.camera,
                 );
 
+                let mut buf = surface.buffer_mut().expect("buffer_mut");
+                blit_bilinear_stretch(&mut buf, dw, &self.fb_small, self.fb_w, &self.scale_lut);
+
+                sharpen3x3_cross_inplace(&mut buf, dw, dh);
+
                 buf.present().unwrap();
+
+                // Print FPS
+                self.frame_counter += 1;
+                let now = Instant::now();
+                if now.duration_since(self.last_fps_print).as_secs_f32() >= 1.0 {
+                    let fps = self.frame_counter as f32
+                        / now.duration_since(self.last_fps_print).as_secs_f32();
+                    println!("FPS: {:.1}", fps);
+                    self.frame_counter = 0;
+                    self.last_fps_print = now;
+                }
+
                 self.window.as_ref().unwrap().request_redraw();
             }
 
             WindowEvent::Resized(new_size) => {
-                // Update camera focal factors
-                self.camera.set_fov_from_height(
-                    new_size.width as f32,
-                    new_size.height as f32,
-                    75.0,
-                );
+                let (dw, dh) = (new_size.width as usize, new_size.height as usize);
+                // Update internal window
+                self.rebuild_internal_fb_and_lut(dw, dh);
             }
             _ => (),
         }
@@ -192,7 +229,7 @@ impl ApplicationHandler for App {
 
 impl App {
     fn tick(&mut self) {
-        // Compute dt (cap to avoid huge jumps if the app was paused)
+        // Compute dt with cap to avoid huge jumps if the app was paused
         let now = Instant::now();
         let mut dt = now.duration_since(self.last_tick);
         self.last_tick = now;
@@ -248,7 +285,7 @@ impl App {
         if fwd != 0.0 || strafe != 0.0 {
             let c = self.camera.yaw.cos();
             let s = self.camera.yaw.sin();
-            // forward vector (0, +1) rotated by yaw = (s, c) in our +Y-forward convention
+            // forward vector (0, +1) rotated by yaw = (s, c) in +Y forward convention
             let dir_fwd = [s, c];
             let dir_right = [c, -s]; // perpendicular (right-hand)
 
@@ -260,6 +297,36 @@ impl App {
             self.camera.pos[1] += dy;
         }
     }
+
+    fn rebuild_internal_fb_and_lut(&mut self, dst_w: usize, dst_h: usize) {
+        // Keep internal height fixed (controls pixel size look)
+        let target_h = 480usize;
+        let aspect = if dst_h > 0 {
+            dst_w as f32 / dst_h as f32
+        } else {
+            1.0
+        };
+
+        // Derive width from aspect
+        let mut target_w = (target_h as f32 * aspect).round() as usize; // round to even for SIMD alignment
+        if target_w < 160 {
+            target_w = 160;
+        }
+        if target_w % 2 != 0 {
+            target_w += 1;
+        }
+
+        // Reallocate internal FB if size changed
+        if target_w != self.fb_w || target_h != self.fb_h {
+            self.fb_w = target_w;
+            self.fb_h = target_h;
+            self.fb_small = vec![0u32; self.fb_w * self.fb_h];
+        }
+
+        self.camera
+            .set_fov_from_horizontal(self.fb_w as f32, self.fb_h as f32, 90.0);
+        self.scale_lut = build_scale_lut(dst_w, dst_h, self.fb_w, self.fb_h);
+    }
 }
 
 fn main() {
@@ -267,13 +334,13 @@ fn main() {
 
     // ControlFlow::Poll continuously runs the event loop, even if the OS hasn't
     // dispatched any events. This is ideal for games and similar applications.
-    event_loop.set_control_flow(ControlFlow::Poll);
+    // event_loop.set_control_flow(ControlFlow::Poll);
 
     // ControlFlow::Wait pauses the event loop if no events are available to process.
     // This is ideal for non-game applications that only update in response to user
     // input, and uses significantly less power/CPU time than ControlFlow::Poll.
-    // event_loop.set_control_flow(ControlFlow::Wait);
+    event_loop.set_control_flow(ControlFlow::Wait);
 
     let mut app = App::default();
-    event_loop.run_app(&mut app);
+    let _ = event_loop.run_app(&mut app);
 }
