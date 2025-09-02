@@ -40,6 +40,10 @@ pub fn render_frame(buf: &mut [u32], width: usize, height: usize, world: &World,
         return;
     }
 
+    // sentinels
+    let mut ceil_clip: Vec<i32> = vec![height as i32; width]; // “no top yet”
+    let mut floor_clip: Vec<i32> = vec![-1; width];
+
     let mut order: Vec<usize> = (0..world.walls.len()).collect();
     order.sort_by(|&ia, &ib| {
         let wa = &world.walls[ia];
@@ -60,7 +64,42 @@ pub fn render_frame(buf: &mut [u32], width: usize, height: usize, world: &World,
         let wall = &world.walls[i];
         let sector = &world.sectors[wall.front_sector];
         let color = wall_colors[i % wall_colors.len()];
-        draw_solid_wall(buf, width, height, camera, wall, sector, color);
+        draw_solid_wall(
+            buf,
+            width,
+            height,
+            camera,
+            wall,
+            sector,
+            color,
+            &mut ceil_clip,
+            &mut floor_clip,
+        );
+    }
+
+    let ceil_color = pack_rgb(200, 200, 200);
+    let floor_color = pack_rgb(30, 30, 70);
+
+    // post fill
+    for x in 0..width {
+        // draw ceiling only if top is known
+        let cc = ceil_clip[x];
+        let fc = floor_clip[x];
+        if cc >= height as i32 && fc < 0 {
+            continue;
+        }
+
+        if cc < height as i32 {
+            for y in 0..cc.clamp(0, height as i32) {
+                buf[y as usize * width + x] = ceil_color;
+            }
+        }
+        // draw floor only if bottom is known
+        if fc >= 0 {
+            for y in (fc.clamp(-1, height as i32 - 1) + 1)..(height as i32) {
+                buf[y as usize * width + x] = floor_color;
+            }
+        }
     }
 }
 
@@ -72,6 +111,8 @@ fn draw_solid_wall(
     wall: &crate::world::Wall,
     sector: &crate::world::Sector,
     color: u32,
+    ceil_clip: &mut [i32],
+    floor_clip: &mut [i32],
 ) {
     let screen_width = width as f32;
     let screen_height = height as f32;
@@ -164,6 +205,13 @@ fn draw_solid_wall(
         for _y in y0..=y1 {
             buf[idx] = color;
             idx += width;
+        }
+
+        if y0 < ceil_clip[x] {
+            ceil_clip[x] = y0;
+        }
+        if y1 > floor_clip[x] {
+            floor_clip[x] = y1;
         }
     }
 }
